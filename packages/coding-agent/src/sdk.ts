@@ -1422,6 +1422,16 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 			}
 		}
 
+		const reloadSshTool = async (): Promise<AgentTool | null> => {
+			const sshTool = (await loadSshTool({
+				...toolSession,
+				cwd: sessionManager.getCwd(),
+			})) as unknown as AgentTool | null;
+			if (!sshTool) return null;
+			const wrapped = wrapToolWithMetaNotice(sshTool);
+			return (extensionRunner ? new ExtensionToolWrapper(wrapped, extensionRunner) : wrapped) as AgentTool;
+		};
+
 		let cursorEventEmitter: ((event: AgentEvent) => void) | undefined;
 		const cursorExecHandlers = new CursorExecHandlers({
 			cwd,
@@ -1804,6 +1814,7 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 			onResponse,
 			convertToLlm: convertToLlmFinal,
 			rebuildSystemPrompt,
+			reloadSshTool,
 			getMcpServerInstructions: mcpManager
 				? () => {
 						const raw = mcpManager.getServerInstructions();

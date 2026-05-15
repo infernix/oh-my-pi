@@ -62,6 +62,7 @@ import {
 	Snowflake,
 } from "@oh-my-pi/pi-utils";
 import { type AsyncJob, AsyncJobManager } from "../async";
+import { reset as resetCapabilities } from "../capability";
 import type { Rule } from "../capability/rule";
 import { MODEL_ROLE_IDS, type ModelRegistry } from "../config/model-registry";
 import {
@@ -274,6 +275,8 @@ export interface AgentSessionConfig {
 	convertToLlm?: (messages: AgentMessage[]) => Message[] | Promise<Message[]>;
 	/** System prompt builder that can consider tool availability. Returns ordered provider-facing blocks. */
 	rebuildSystemPrompt?: (toolNames: string[], tools: Map<string, AgentTool>) => Promise<{ systemPrompt: string[] }>;
+	/** Rebuild the SSH tool from current capability discovery results. */
+	reloadSshTool?: () => Promise<AgentTool | null>;
 	/**
 	 * Optional accessor for live MCP server instructions. Read by the session's
 	 * `rebuildSystemPrompt`-skip optimization to detect server-side instruction
@@ -729,6 +732,7 @@ export class AgentSession {
 		| ((toolNames: string[], tools: Map<string, AgentTool>) => Promise<{ systemPrompt: string[] }>)
 		| undefined;
 	#getMcpServerInstructions: (() => Map<string, string> | undefined) | undefined;
+	#reloadSshTool: (() => Promise<AgentTool | null>) | undefined;
 	#baseSystemPrompt: string[];
 	/**
 	 * Signature of the (toolNames, tool descriptions) tuple passed to the most
@@ -879,6 +883,7 @@ export class AgentSession {
 		this.#convertToLlm = config.convertToLlm ?? convertToLlm;
 		this.#rebuildSystemPrompt = config.rebuildSystemPrompt;
 		this.#getMcpServerInstructions = config.getMcpServerInstructions;
+		this.#reloadSshTool = config.reloadSshTool;
 		this.#baseSystemPrompt = this.agent.state.systemPrompt;
 		this.#mcpDiscoveryEnabled = config.mcpDiscoveryEnabled ?? false;
 		this.#setDiscoverableMCPTools(this.#collectDiscoverableMCPToolsFromRegistry());
@@ -2991,6 +2996,32 @@ export class AgentSession {
 		if (options?.persistMCPSelection !== false) {
 			this.#persistSelectedMCPToolNamesIfChanged(previousSelectedMCPToolNames);
 		}
+	}
+
+	/**
+	 * Reload the SSH tool from disk-backed capability discovery and make the
+	 * refreshed definition visible to the next model call without restarting.
+	 */
+	async refreshSshTool(options?: { activateIfAvailable?: boolean }): Promise<void> {
+		resetCapabilities();
+		if (!this.#reloadSshTool) return;
+		const refreshedTool = await this.#reloadSshTool();
+		const previousActiveToolNames = this.getActiveToolNames();
+		const hadSshTool = this.#toolRegistry.has("ssh");
+		const wasActive = previousActiveToolNames.includes("ssh");
+
+		if (refreshedTool) {
+			this.#toolRegistry.set(refreshedTool.name, refreshedTool);
+		} else {
+			this.#toolRegistry.delete("ssh");
+			this.#selectedDiscoveredToolNames.delete("ssh");
+		}
+
+		const nextActive = previousActiveToolNames.filter(name => name !== "ssh" && this.#toolRegistry.has(name));
+		if (refreshedTool && (wasActive || (options?.activateIfAvailable && !hadSshTool))) {
+			nextActive.push(refreshedTool.name);
+		}
+		await this.#applyActiveToolsByName(nextActive);
 	}
 
 	/**

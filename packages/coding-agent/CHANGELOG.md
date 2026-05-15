@@ -34,6 +34,7 @@
 ### Fixed
 
 - Fixed `create_conventional_analysis` parsing to ignore harmless extra fields and still parse the required conventional fields
+- Fixed SSH host additions/removals made inside a running session not refreshing the live `ssh` tool. `/ssh add` and `/ssh remove` now update the model-visible host list immediately, while `/reload-plugins` and `/move` refresh SSH discovery for external or project-scope config changes without restart.
 - Fixed BashTool async request validation flow so async execution remains disabled and returns the explicit `Async bash execution is disabled` error
 - Fixed `task.simple` invalid `schema` and `context` argument handling to still reject unsupported fields after tool-argument validation
 - Fixed subagent execution hangs by enforcing `task.maxRuntimeMs` as a wall-clock limit even when inference streaming stalls, so stuck subagents now abort and report runtime-limit exceeded
